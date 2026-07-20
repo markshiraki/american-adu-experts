@@ -441,6 +441,76 @@
     .trust-strip .container{ flex-direction:column; }
     .header-cta .phone{ display:none; }
   }
+  /* CHATBOT WIDGET */
+  #chatbot-launcher{
+    position:fixed; bottom:24px; right:24px; z-index:200;
+    width:60px; height:60px; border-radius:50%;
+    background:var(--olive); color:var(--white);
+    border:none; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:var(--shadow);
+    transition:background .2s ease, transform .2s ease;
+  }
+  #chatbot-launcher:hover{ background:var(--olive-light); transform:translateY(-2px); }
+  #chatbot-launcher svg{ width:26px; height:26px; }
+  #chatbot-panel{
+    position:fixed; bottom:96px; right:24px; z-index:200;
+    width:360px; max-width:calc(100vw - 32px);
+    height:480px; max-height:calc(100vh - 140px);
+    background:var(--white); border-radius:8px;
+    box-shadow:var(--shadow);
+    display:none; flex-direction:column; overflow:hidden;
+    font-family:'Karla', sans-serif;
+  }
+  #chatbot-panel.open{ display:flex; }
+  #chatbot-header{
+    background:var(--green-deep); color:var(--white);
+    padding:16px 18px; display:flex; align-items:center; justify-content:space-between;
+    flex-shrink:0;
+  }
+  #chatbot-header .title{
+    font-family:'Oswald', sans-serif; text-transform:uppercase; letter-spacing:0.5px;
+    font-size:13.5px; font-weight:700; color:var(--olive-light);
+  }
+  #chatbot-header .subtitle{ font-size:11px; color:#c9c4a8; margin-top:2px; }
+  #chatbot-close{
+    background:none; border:none; color:var(--white); cursor:pointer;
+    font-size:20px; line-height:1; padding:4px;
+  }
+  #chatbot-messages{
+    flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px;
+    background:var(--cream);
+  }
+  .chatbot-msg{
+    max-width:82%; padding:10px 13px; border-radius:10px; font-size:13.5px; line-height:1.5;
+  }
+  .chatbot-msg.bot{
+    background:var(--white); color:var(--text-dark); align-self:flex-start;
+    border:1px solid #e5e1d2;
+  }
+  .chatbot-msg.user{
+    background:var(--olive); color:var(--white); align-self:flex-end;
+  }
+  .chatbot-msg.typing{ color:var(--text-muted); font-style:italic; }
+  #chatbot-form{
+    display:flex; gap:8px; padding:12px; border-top:1px solid #e5e1d2; flex-shrink:0; background:var(--white);
+  }
+  #chatbot-input{
+    flex:1; border:1px solid #d8d4c2; border-radius:4px; padding:10px 12px;
+    font-family:'Karla', sans-serif; font-size:13.5px; resize:none;
+  }
+  #chatbot-input:focus{ outline:none; border-color:var(--olive); }
+  #chatbot-send{
+    background:var(--olive); color:var(--white); border:none; border-radius:4px;
+    padding:0 16px; cursor:pointer; font-family:'Oswald', sans-serif; font-weight:600;
+    font-size:12px; text-transform:uppercase; letter-spacing:0.5px;
+  }
+  #chatbot-send:hover{ background:var(--olive-light); }
+  #chatbot-send:disabled{ opacity:0.6; cursor:not-allowed; }
+  @media (max-width: 480px){
+    #chatbot-panel{ right:16px; left:16px; width:auto; }
+    #chatbot-launcher{ right:16px; }
+  }
 </style>
 </head>
 <body>
@@ -685,6 +755,113 @@
     const scrollAmount = card.getBoundingClientRect().width + gap;
     track.scrollBy({ left: dir * scrollAmount, behavior: 'smooth' });
   }
+</script>
+
+<!-- CHATBOT WIDGET -->
+<button id="chatbot-launcher" aria-label="Open chat">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+</button>
+<div id="chatbot-panel">
+  <div id="chatbot-header">
+    <div>
+      <div class="title">American ADU Experts</div>
+      <div class="subtitle">Ask us anything about your project</div>
+    </div>
+    <button id="chatbot-close" aria-label="Close chat">&times;</button>
+  </div>
+  <div id="chatbot-messages"></div>
+  <form id="chatbot-form">
+    <textarea id="chatbot-input" rows="1" placeholder="Type your question..." required></textarea>
+    <button id="chatbot-send" type="submit">Send</button>
+  </form>
+</div>
+<script>
+(function(){
+  var launcher = document.getElementById('chatbot-launcher');
+  var panel = document.getElementById('chatbot-panel');
+  var closeBtn = document.getElementById('chatbot-close');
+  var messagesEl = document.getElementById('chatbot-messages');
+  var form = document.getElementById('chatbot-form');
+  var input = document.getElementById('chatbot-input');
+  var sendBtn = document.getElementById('chatbot-send');
+
+  var history = []; // {role: 'user'|'model', text: string}
+  var greeted = false;
+
+  function addMessage(role, text){
+    var div = document.createElement('div');
+    div.className = 'chatbot-msg ' + (role === 'user' ? 'user' : 'bot');
+    div.textContent = text;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  function openPanel(){
+    panel.classList.add('open');
+    if (!greeted) {
+      greeted = true;
+      addMessage('bot', "Hi! I'm the American ADU Experts assistant. Ask me about our process, timelines, permits, or how to get started — I'm happy to help. (For exact pricing, I'll point you to a free consultation.)");
+    }
+    input.focus();
+  }
+
+  launcher.addEventListener('click', function(){
+    if (panel.classList.contains('open')) {
+      panel.classList.remove('open');
+    } else {
+      openPanel();
+    }
+  });
+  closeBtn.addEventListener('click', function(){ panel.classList.remove('open'); });
+
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var text = input.value.trim();
+    if (!text) return;
+    addMessage('user', text);
+    history.push({ role: 'user', text: text });
+    input.value = '';
+    input.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    var typingEl = document.createElement('div');
+    typingEl.className = 'chatbot-msg bot typing';
+    typingEl.textContent = 'Typing...';
+    messagesEl.appendChild(typingEl);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: history })
+    })
+      .then(function(res){ return res.json().then(function(data){ return { ok: res.ok, data: data }; }); })
+      .then(function(result){
+        typingEl.remove();
+        var replyText = (result.ok && result.data && result.data.reply)
+          ? result.data.reply
+          : ((result.data && result.data.error) || "Sorry, something went wrong. Please try again or call us at (949) 123-4567.");
+        addMessage('model', replyText);
+        history.push({ role: 'model', text: replyText });
+      })
+      .catch(function(){
+        typingEl.remove();
+        addMessage('model', "Sorry, I couldn't connect just now. Please try again, or call us at (949) 123-4567.");
+      })
+      .finally(function(){
+        sendBtn.disabled = false;
+        input.focus();
+      });
+  });
+
+  input.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+})();
 </script>
 </body>
 </html>
