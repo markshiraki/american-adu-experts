@@ -1,4 +1,3 @@
-
 // Vercel serverless function: /api/chat
 // Calls Google's Gemini API (generateContent) to answer visitor questions
 // about American ADU Experts, grounded in a fixed knowledge base.
@@ -31,7 +30,7 @@ const SYSTEM_PROMPT = [
   "- Never claim to be human. If asked, say you're an AI assistant for American ADU Experts.",
 ].join("");
 
-const MODEL = "gemini-2.5-flash-lite";
+const MODEL = "gemini-3.1-flash-lite";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 function extractText(data) {
