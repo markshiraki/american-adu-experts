@@ -1,8 +1,10 @@
+
 // Vercel serverless function: /api/chat
-// Calls Google's Gemini Interactions API (free tier) to answer visitor
-// questions about American ADU Experts, grounded in a fixed knowledge base.
+// Calls Google's Gemini API (generateContent) to answer visitor questions
+// about American ADU Experts, grounded in a fixed knowledge base.
 // Requires the GEMINI_API_KEY environment variable to be set in Vercel
-// (Project Settings -> Environment Variables). Get a free key at
+// (Project Settings -> Environment Variables, on the specific project, not
+// the team-wide "All Projects" page). Get a free key at
 // https://aistudio.google.com/apikey
 
 const SYSTEM_PROMPT = [
@@ -30,7 +32,24 @@ const SYSTEM_PROMPT = [
 ].join("");
 
 const MODEL = "gemini-2.5-flash-lite";
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/interactions";
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+
+function extractText(data) {
+  try {
+    const candidate = data && Array.isArray(data.candidates) ? data.candidates[0] : null;
+    const parts = candidate && candidate.content && candidate.content.parts;
+    if (Array.isArray(parts)) {
+      const text = parts
+        .map((p) => (p && typeof p.text === "string" ? p.text : ""))
+        .join("")
+        .trim();
+      if (text) return text;
+    }
+  } catch (e) {
+    // fall through
+  }
+  return null;
+}
 
 function extractErrorDetail(data, status) {
   if (data && data.error && (data.error.message || data.error.status || data.error.code)) {
@@ -42,37 +61,14 @@ function extractErrorDetail(data, status) {
   return `HTTP ${status}`;
 }
 
-function extractText(data) {
-  if (!data) return null;
-  if (typeof data.output_text === "string" && data.output_text.trim()) {
-    return data.output_text;
-  }
-  if (Array.isArray(data.steps)) {
-    for (const step of data.steps) {
-      if (Array.isArray(step.content)) {
-        for (const part of step.content) {
-          if (part && part.type === "text" && typeof part.text === "string" && part.text.trim()) {
-            return part.text;
-          }
-        }
-      }
-    }
-  }
-  return null;
-}
-
-async function callGemini(apiKey, { input, previousInteractionId }) {
+async function callGemini(apiKey, contents) {
   const body = {
-    model: MODEL,
-    input: input,
-    system_instruction: SYSTEM_PROMPT,
-    generation_config: { temperature: 0.4, max_output_tokens: 350 },
+    contents,
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    generationConfig: { temperature: 0.4, maxOutputTokens: 350 },
   };
-  if (previousInteractionId) {
-    body.previous_interaction_id = previousInteractionId;
-  }
 
-  const resp = await fetch(API_BASE, {
+  const resp = await fetch(API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -116,22 +112,28 @@ export default async function handler(req, res) {
   }
 
   const message = typeof body.message === "string" ? body.message.trim().slice(0, 2000) : "";
-  const previousInteractionId =
-    typeof body.previousInteractionId === "string" ? body.previousInteractionId : null;
+  const rawHistory = Array.isArray(body.history) ? body.history : [];
 
   if (!message) {
     return res.status(400).json({ error: "No message provided." });
   }
 
-  try {
-    let result = await callGemini(apiKey, { input: message, previousInteractionId });
+  // Sanitize and cap the conversation history the browser sends back to us.
+  const history = rawHistory
+    .filter(
+      (h) =>
+        h &&
+        (h.role === "user" || h.role === "model") &&
+        typeof h.text === "string" &&
+        h.text.trim()
+    )
+    .slice(-20)
+    .map((h) => ({ role: h.role, parts: [{ text: h.text.slice(0, 2000) }] }));
 
-    // If continuing a conversation fails (e.g. stale/expired interaction id),
-    // retry once as a fresh conversation instead of hard-failing.
-    if (!result.ok && previousInteractionId) {
-      console.error("Gemini API error (with previous_interaction_id):", result.status, result.raw);
-      result = await callGemini(apiKey, { input: message, previousInteractionId: null });
-    }
+  const contents = history.concat([{ role: "user", parts: [{ text: message }] }]);
+
+  try {
+    const result = await callGemini(apiKey, contents);
 
     if (!result.ok) {
       console.error("Gemini API error:", result.status, result.raw);
@@ -151,14 +153,10 @@ export default async function handler(req, res) {
       return res.status(200).json({
         reply:
           "Sorry, I wasn't able to come up with a response. Please try rephrasing, or contact us directly at (949) 123-4567.",
-        interactionId: result.data && result.data.id ? result.data.id : null,
       });
     }
 
-    return res.status(200).json({
-      reply: replyText,
-      interactionId: result.data && result.data.id ? result.data.id : null,
-    });
+    return res.status(200).json({ reply: replyText });
   } catch (err) {
     console.error("Chat handler error:", err);
     return res.status(500).json({
