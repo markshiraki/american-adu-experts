@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -786,7 +785,7 @@
   var input = document.getElementById('chatbot-input');
   var sendBtn = document.getElementById('chatbot-send');
 
-  var previousInteractionId = null;
+  var history = [];
   var greeted = false;
 
   function addMessage(role, text){
@@ -834,7 +833,7 @@
     fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, previousInteractionId: previousInteractionId })
+      body: JSON.stringify({ message: text, history: history })
     })
       .then(function(res){ return res.json().then(function(data){ return { ok: res.ok, data: data }; }); })
       .then(function(result){
@@ -843,8 +842,9 @@
           ? result.data.reply
           : ((result.data && result.data.error) || "Sorry, something went wrong. Please try again or call us at (949) 123-4567.");
         addMessage('model', replyText);
-        if (result.ok && result.data && result.data.interactionId) {
-          previousInteractionId = result.data.interactionId;
+        if (result.ok && result.data && result.data.reply) {
+          history.push({ role: 'user', text: text });
+          history.push({ role: 'model', text: result.data.reply });
         }
       })
       .catch(function(){
