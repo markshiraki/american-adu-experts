@@ -32,6 +32,16 @@ const SYSTEM_PROMPT = [
 const MODEL = "gemini-2.5-flash-lite";
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/interactions";
 
+function extractErrorDetail(data, status) {
+  if (data && data.error && (data.error.message || data.error.status || data.error.code)) {
+    const code = data.error.code || status;
+    const st = data.error.status ? ` ${data.error.status}` : "";
+    const msg = data.error.message ? `: ${data.error.message}` : "";
+    return `${code}${st}${msg}`;
+  }
+  return `HTTP ${status}`;
+}
+
 function extractText(data) {
   if (!data) return null;
   if (typeof data.output_text === "string" && data.output_text.trim()) {
@@ -125,9 +135,13 @@ export default async function handler(req, res) {
 
     if (!result.ok) {
       console.error("Gemini API error:", result.status, result.raw);
+      // TEMPORARY DEBUG MODE: surface the real Gemini error detail directly
+      // in the chat reply so it's visible without digging through Vercel
+      // Logs. Once the chat is confirmed working, this should be reverted
+      // back to a clean generic message.
+      const detail = extractErrorDetail(result.data, result.status);
       return res.status(502).json({
-        error:
-          "The chat assistant is temporarily unavailable. Please try again in a moment, or call (949) 123-4567.",
+        error: `[DEBUG] Gemini API call failed (${detail}). Please try again in a moment, or call (949) 123-4567.`,
       });
     }
 
