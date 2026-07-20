@@ -1,6 +1,6 @@
 // Vercel serverless function: /api/chat
-// Calls Google's Gemini API (free tier) to answer visitor questions about
-// American ADU Experts, grounded in a fixed knowledge base below.
+// Calls Google's Gemini Interactions API (free tier) to answer visitor
+// questions about American ADU Experts, grounded in a fixed knowledge base.
 // Requires the GEMINI_API_KEY environment variable to be set in Vercel
 // (Project Settings -> Environment Variables). Get a free key at
 // https://aistudio.google.com/apikey
@@ -29,6 +29,59 @@ const SYSTEM_PROMPT = [
   "- Never claim to be human. If asked, say you're an AI assistant for American ADU Experts.",
 ].join("");
 
+const MODEL = "gemini-2.5-flash-lite";
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta/interactions";
+
+function extractText(data) {
+  if (!data) return null;
+  if (typeof data.output_text === "string" && data.output_text.trim()) {
+    return data.output_text;
+  }
+  if (Array.isArray(data.steps)) {
+    for (const step of data.steps) {
+      if (Array.isArray(step.content)) {
+        for (const part of step.content) {
+          if (part && part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+            return part.text;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+async function callGemini(apiKey, { input, previousInteractionId }) {
+  const body = {
+    model: MODEL,
+    input: input,
+    system_instruction: SYSTEM_PROMPT,
+    generation_config: { temperature: 0.4, max_output_tokens: 350 },
+  };
+  if (previousInteractionId) {
+    body.previous_interaction_id = previousInteractionId;
+  }
+
+  const resp = await fetch(API_BASE, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await resp.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    data = null;
+  }
+
+  return { ok: resp.ok, status: resp.status, data, raw: text };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -52,57 +105,46 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Invalid request body." });
   }
 
-  const messages = Array.isArray(body.messages) ? body.messages : [];
-  // Keep only the most recent turns and cap message length to bound cost/abuse.
-  const trimmed = messages.slice(-12);
-  const contents = trimmed
-    .filter(
-      (m) =>
-        m &&
-        typeof m.text === "string" &&
-        m.text.trim().length > 0 &&
-        (m.role === "user" || m.role === "model")
-    )
-    .map((m) => ({ role: m.role, parts: [{ text: m.text.slice(0, 2000) }] }));
+  const message = typeof body.message === "string" ? body.message.trim().slice(0, 2000) : "";
+  const previousInteractionId =
+    typeof body.previousInteractionId === "string" ? body.previousInteractionId : null;
 
-  if (contents.length === 0) {
+  if (!message) {
     return res.status(400).json({ error: "No message provided." });
   }
 
   try {
-    const resp = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" +
-        apiKey,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          generationConfig: { temperature: 0.4, maxOutputTokens: 350 },
-        }),
-      }
-    );
+    let result = await callGemini(apiKey, { input: message, previousInteractionId });
 
-    if (!resp.ok) {
-      const errText = await resp.text();
-      console.error("Gemini API error:", resp.status, errText);
-      return res
-        .status(502)
-        .json({ error: "The chat assistant is temporarily unavailable. Please try again in a moment, or call (949) 123-4567." });
+    // If continuing a conversation fails (e.g. stale/expired interaction id),
+    // retry once as a fresh conversation instead of hard-failing.
+    if (!result.ok && previousInteractionId) {
+      console.error("Gemini API error (with previous_interaction_id):", result.status, result.raw);
+      result = await callGemini(apiKey, { input: message, previousInteractionId: null });
     }
 
-    const data = await resp.json();
-    const reply =
-      (data &&
-        data.candidates &&
-        data.candidates[0] &&
-        data.candidates[0].content &&
-        data.candidates[0].content.parts &&
-        data.candidates[0].content.parts.map((p) => p.text || "").join("")) ||
-      "Sorry, I wasn't able to come up with a response. Please try rephrasing, or contact us directly at (949) 123-4567.";
+    if (!result.ok) {
+      console.error("Gemini API error:", result.status, result.raw);
+      return res.status(502).json({
+        error:
+          "The chat assistant is temporarily unavailable. Please try again in a moment, or call (949) 123-4567.",
+      });
+    }
 
-    return res.status(200).json({ reply });
+    const replyText = extractText(result.data);
+    if (!replyText) {
+      console.error("Gemini API: no text in response:", result.raw);
+      return res.status(200).json({
+        reply:
+          "Sorry, I wasn't able to come up with a response. Please try rephrasing, or contact us directly at (949) 123-4567.",
+        interactionId: result.data && result.data.id ? result.data.id : null,
+      });
+    }
+
+    return res.status(200).json({
+      reply: replyText,
+      interactionId: result.data && result.data.id ? result.data.id : null,
+    });
   } catch (err) {
     console.error("Chat handler error:", err);
     return res.status(500).json({
