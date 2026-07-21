@@ -136,13 +136,9 @@ export default async function handler(req, res) {
 
     if (!result.ok) {
       console.error("Gemini API error:", result.status, result.raw);
-      // TEMPORARY DEBUG MODE: surface the real Gemini error detail directly
-      // in the chat reply so it's visible without digging through Vercel
-      // Logs. Once the chat is confirmed working, this should be reverted
-      // back to a clean generic message.
-      const detail = extractErrorDetail(result.data, result.status);
       return res.status(502).json({
-        error: `[DEBUG] Gemini API call failed (${detail}). Please try again in a moment, or call (949) 123-4567.`,
+        error:
+          "The chat assistant is temporarily unavailable. Please try again in a moment, or call (949) 123-4567.",
       });
     }
 
